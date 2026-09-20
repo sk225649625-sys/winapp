@@ -6,6 +6,7 @@ using ReelForge.Infrastructure;
 using ReelForge.Models;
 using ReelForge.Services;
 
+using System.IO;
 namespace ReelForge.Web;
 
 public sealed class NativeBridge
