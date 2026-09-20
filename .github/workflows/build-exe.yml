@@ -1,4 +1,4 @@
-name: build-windows-native
+name: build-native-cpp
 
 on:
   push:
@@ -14,44 +14,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
-
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Build native C++ + C#
-        run: msbuild ReelForge.sln /m /p:Configuration=Release /p:Platform=x64
-
-      - name: Publish single-file EXE
-        run: dotnet publish ReelForge/ReelForge.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish
+      - name: Build pure C++ x64
+        run: msbuild ReelForgeNative.sln /m /p:Configuration=Release /p:Platform=x64
 
       - name: Package
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path package | Out-Null
-          Copy-Item publish\* package\ -Recurse -Force
-          New-Item -ItemType Directory -Force -Path package\data\projects,package\data\cache,package\data\exports,package\data\logs | Out-Null
-          if (Test-Path ReelForge\native\ReelForge.Native.dll) {
-            Copy-Item ReelForge\native\ReelForge.Native.dll package\ -Force
-          } elseif (Test-Path native\ReelForge.Native\bin\Release\x64\ReelForge.Native.dll) {
-            Copy-Item native\ReelForge.Native\bin\Release\x64\ReelForge.Native.dll package\ -Force
-          }
-
-      - name: Zip artifact
-        shell: pwsh
-        run: Compress-Archive -Path package\* -DestinationPath ReelForge-Windows-x64.zip -Force
+          New-Item -ItemType Directory -Force -Path package\data\projects,package\data\cache,package\data\exports | Out-Null
+          Copy-Item ReelForgeNative\bin\Release\x64\ReelForgeNative.exe package\ -Force
+          Compress-Archive -Path package\* -DestinationPath ReelForge-Full-CPlusPlus-Windows-x64.zip -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ReelForge-Windows-x64
-          path: ReelForge-Windows-x64.zip
+          name: ReelForge-Full-CPlusPlus-Windows-x64
+          path: ReelForge-Full-CPlusPlus-Windows-x64.zip
 
       - name: Release tagged build
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: ReelForge-Windows-x64.zip
+          files: ReelForge-Full-CPlusPlus-Windows-x64.zip
