@@ -434,30 +434,61 @@ const mediaBy=n=>MEDIA.find(m=>m.name===n);
 
 function toast(m,ms=2800){const el=$('#toast');el.textContent=m;el.classList.add('on');
   clearTimeout(toast._t);toast._t=setTimeout(()=>el.classList.remove('on'),ms);}
-/* Antivirus/firewall kabhi kabhi request beech me hi kaat deta hai (Windows par
-   aam baat hai). Ek network glitch se poora kaam ruk na jaye, isliye har GET/POST
-   ko 2 baar dobara try karte hain, thodi der ruk kar. */
-function wait(ms){return new Promise(r=>setTimeout(r,ms));}
-async function jget(p,tries=3){
-  let err;
-  for(let i=0;i<tries;i++){
-    try{const r=await fetch(p,{cache:'no-store'});
-      if(!r.ok)throw new Error('HTTP '+r.status);
-      return await r.json();
-    }catch(e){err=e; if(i<tries-1)await wait(350*(i+1));}
-  }
-  throw err;
+/* Native desktop bridge:
+   ReelForge Windows app is local-only. No localhost/TCP server and no HTTP upload
+   is used for app commands. JavaScript talks directly to the WPF/WebView2 host. */
+const nativePending=new Map(); let nativeSeq=1;
+window.__reelforgeNativeResult=(id,payload)=>{
+  const w=nativePending.get(id);
+  if(!w)return;
+  nativePending.delete(id);
+  if(payload&&payload.ok===false)w.reject(new Error(payload.error||'native command failed'));
+  else w.resolve(payload&&Object.prototype.hasOwnProperty.call(payload,'result')?payload.result:payload);
+};
+function nativeCall(path,method='GET',body=null){
+  return new Promise((resolve,reject)=>{
+    if(!window.chrome?.webview) return reject(new Error('ReelForge native shell nahi mila'));
+    const id=nativeSeq++;
+    nativePending.set(id,{resolve,reject});
+    try{
+      window.chrome.webview.postMessage(JSON.stringify({
+        type:'rpc',id,path,method,body
+      }));
+    }catch(e){
+      nativePending.delete(id); reject(e);
+    }
+  });
 }
-async function jpost(p,o,tries=2){
-  let err;
-  for(let i=0;i<tries;i++){
-    try{const r=await fetch(p,{method:'POST',
-        headers:{'Content-Type':'application/json'},body:JSON.stringify(o||{})});
-      if(!r.ok)throw new Error('HTTP '+r.status);
-      return await r.json();
-    }catch(e){err=e; if(i<tries-1)await wait(350*(i+1));}
+async function jget(p){return nativeCall(p,'GET',null);}
+async function jpost(p,o){return nativeCall(p,'POST',o||{});}
+
+window.__reelforgeNativeResultImport=(payload)=>{
+  const media=Array.isArray(payload?.media)?payload.media:[];
+  MEDIA=MEDIA.filter(x=>!media.some(y=>y.name===x.name));
+  MEDIA.push(...media);
+  drawMedia();
+  $('#statPill').textContent='tayyar';
+  if(payload?.cancelled)return;
+  const failed=Array.isArray(payload?.failed)?payload.failed:[];
+  if(failed.length){
+    toast(media.length+' file local library me aayi, '+failed.length+' fail: '+failed.slice(0,3).map(x=>x.name).join(', '),6000);
+  }else{
+    toast(media.length+' file local library me aa gayi');
   }
-  throw err;
+};
+window.__reelforgeNativePickResult=(payload)=>{
+  window.__reelforgeNativeResultImport(payload||{});
+};
+function pickLocal(kind){
+  return new Promise((resolve,reject)=>{
+    if(!window.chrome?.webview)return reject(new Error('native picker unavailable'));
+    const id=nativeSeq++;
+    nativePending.set(id,{
+      resolve:(payload)=>{window.__reelforgeNativeResultImport(payload);resolve(payload);},
+      reject
+    });
+    window.chrome.webview.postMessage(JSON.stringify({type:'pickFiles',id,kind}));
+  });
 }
 
 /* ---------- projects ---------- */
@@ -587,11 +618,11 @@ async function boot(){
   catch(e){
     /* pehli koshish antivirus/firewall ke ek glitch se fail ho sakti hai —
        thoda ruk kar ek aakhri baar try karo, phir hi haar maano */
-    toast('Server se judne me dikkat aa rahi hai, dobara koshish kar rahe hain…', 3000);
+    toast('Local data load karne me dikkat aa rahi hai, dobara koshish kar rahe hain…', 3000);
     await new Promise(r=>setTimeout(r,1500));
     try{ await boot(); }
     catch(e2){
-      toast('Server se connect nahi hua — start-reelforge.bat chalao, ya firewall/antivirus check karo', 8000);
+      toast('Local ReelForge shell start nahi hua. App ko dobara kholo.', 8000);
     }
   }
 })();
@@ -673,55 +704,38 @@ async function delMedia(n){
   if(hadVoice)autofitClips();
   drawMedia(); drawTimeline(); drawInspector(); refresh(); save();
 }
-async function uploadOne(f,kind,tries=3){
-  const headers={'X-Name':encodeURIComponent(f.name)};
-  if(kind)headers['X-Kind']=kind;
-  let err;
-  for(let i=0;i<tries;i++){
-    try{
-      const r=await fetch('/api/upload',{method:'POST',headers,body:f});
-      if(!r.ok)throw new Error('HTTP '+r.status);
-      const j=await r.json();
-      if(!j.ok)throw new Error(j.error||'upload fail');
-      return j;
-    }catch(e){err=e; if(i<tries-1)await wait(400*(i+1));}
-  }
-  throw err;
-}
 async function upload(files,kind){
-  let ok=0; const failed=[];
-  for(const f of files){
-    $('#statPill').textContent='upload '+(ok+failed.length+1)+'/'+files.length;
-    try{
-      const j=await uploadOne(f,kind);
-      MEDIA=MEDIA.filter(m=>m.name!==j.media.name);MEDIA.push(j.media);
-      ok++; drawMedia();               // turant dikhao — sab files ka wait mat karo
-    }catch(e){ failed.push(f.name); }
-  }
-  $('#statPill').textContent='tayyar'; drawMedia();
-  if(failed.length){
-    toast(ok+' file save hui, '+failed.length+' fail — '+failed.slice(0,3).join(', ')+
-      (failed.length>3?' aur...':'')+'. Antivirus/firewall check karo, dobara try karo.', 6000);
-  }else{
-    toast(ok+' file computer par save ho gayi');
+  // Desktop app mode: the native Windows file picker copies files directly
+  // into data/media. File bytes never travel through fetch/HTTP.
+  try{
+    $('#statPill').textContent='files choose karo…';
+    await pickLocal(kind==='image'?'image':kind);
+  }catch(e){
+    $('#statPill').textContent='tayyar';
+    toast('Local file picker nahi khula: '+(e?.message||'unknown error'),5000);
   }
 }
 document.querySelectorAll('[data-pick]').forEach(btn=>{
-  btn.onclick=()=>{ const kind=btn.dataset.pick;
-    const inp=document.createElement('input'); inp.type='file'; inp.multiple=true;
-    inp.accept = kind==='image' ? 'image/*' : 'audio/*';
-    inp.onchange=()=>upload([...inp.files], kind==='image'?null:kind);
-    inp.click();
+  btn.onclick=()=>{
+    const kind=btn.dataset.pick;
+    upload([],kind==='image'?null:kind);
   };
 });
 document.querySelectorAll('[data-drop]').forEach(zone=>{
   const kind=zone.dataset.drop;
-  ['dragenter','dragover'].forEach(v=>zone.addEventListener(v,e=>{e.preventDefault();e.stopPropagation();zone.classList.add('hot');}));
-  ['dragleave','drop'].forEach(v=>zone.addEventListener(v,e=>{e.preventDefault();e.stopPropagation();zone.classList.remove('hot');}));
-  zone.addEventListener('drop',e=>upload([...e.dataTransfer.files], kind==='image'?null:kind));
+  ['dragenter','dragover'].forEach(v=>zone.addEventListener(v,e=>{
+    e.preventDefault();e.stopPropagation();zone.classList.add('hot');
+  }));
+  ['dragleave','drop'].forEach(v=>zone.addEventListener(v,e=>{
+    e.preventDefault();e.stopPropagation();zone.classList.remove('hot');
+  }));
+  zone.addEventListener('drop',()=>{
+    // WebView2 cannot expose a dropped native path to C# without copying the
+    // entire file through JavaScript memory. Use the native picker instead so
+    // large media stays fast and local.
+    upload([],kind==='image'?null:kind);
+  });
 });
-document.addEventListener('dragover',e=>e.preventDefault());
-document.addEventListener('drop',e=>e.preventDefault());
 $('#sortSel').onchange=drawMedia;
 $('#voiceSortSel').onchange=drawVoiceLib;
 $('#btnAll').onclick=()=>{const im=sortedImages();

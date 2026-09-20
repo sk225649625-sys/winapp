@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using ReelForge.Infrastructure;
 
 namespace ReelForge.Services;
@@ -12,6 +13,7 @@ public sealed class MediaStore
     private readonly string _metaFile;
     private readonly object _metaGate = new();
     private Dictionary<string, string> _kinds = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, CachedMeta> _cache = new(StringComparer.OrdinalIgnoreCase);
 
     public MediaStore(AppPaths paths)
     {
@@ -29,14 +31,33 @@ public sealed class MediaStore
             {
                 var f = new FileInfo(p);
                 var image = IsImage(f.Extension);
+                var stamp = new DateTimeOffset(f.LastWriteTimeUtc).ToUnixTimeMilliseconds();
+                var key = f.Name;
+                var duration = 0d;
+                if (!image)
+                {
+                    if (_cache.TryGetValue(key, out var cached) &&
+                        cached.Size == f.Length &&
+                        cached.Date == stamp)
+                    {
+                        duration = cached.Duration;
+                    }
+                    else
+                    {
+                        duration = ProbeDurationSeconds(f.FullName);
+                        _cache[key] = new CachedMeta { Size = f.Length, Date = stamp, Duration = duration };
+                        SaveMetaLocked();
+                    }
+                }
+
                 items.Add(new MediaItem
                 {
                     Name = f.Name,
                     Type = image ? "image" : "audio",
                     Kind = image ? "image" : GetKind(f.Name),
                     Size = f.Length,
-                    Date = new DateTimeOffset(f.LastWriteTimeUtc).ToUnixTimeMilliseconds(),
-                    Duration = image ? 0 : ProbeDurationSeconds(f.FullName)
+                    Date = stamp,
+                    Duration = duration
                 });
             }
             catch
@@ -94,6 +115,7 @@ public sealed class MediaStore
         lock (_metaGate)
         {
             _kinds.Remove(clean);
+            _cache.Remove(clean);
             SaveMetaLocked();
         }
         return true;
@@ -127,14 +149,37 @@ public sealed class MediaStore
     {
         try
         {
-            if (File.Exists(_metaFile))
+            if (!File.Exists(_metaFile))
+            {
+                _kinds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                _cache = new Dictionary<string, CachedMeta>(StringComparer.OrdinalIgnoreCase);
+                return;
+            }
+
+            var root = JsonNode.Parse(File.ReadAllText(_metaFile))?.AsObject();
+            if (root is not null && root["kinds"] is JsonObject kindsNode)
+            {
+                _kinds = kindsNode.Deserialize<Dictionary<string, string>>()
+                         ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                _cache = root["cache"]?.Deserialize<Dictionary<string, CachedMeta>>()
+                         ?? new Dictionary<string, CachedMeta>(StringComparer.OrdinalIgnoreCase);
+            }
+            else
+            {
+                // Backward compatibility with the old simple dictionary format.
                 _kinds = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(_metaFile))
                          ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                _cache = new Dictionary<string, CachedMeta>(StringComparer.OrdinalIgnoreCase);
+            }
+
             _kinds = new Dictionary<string, string>(_kinds, StringComparer.OrdinalIgnoreCase);
+            _cache = new Dictionary<string, CachedMeta>(_cache, StringComparer.OrdinalIgnoreCase);
         }
         catch
         {
             _kinds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            _cache = new Dictionary<string, CachedMeta>(StringComparer.OrdinalIgnoreCase);
         }
     }
 
@@ -142,12 +187,85 @@ public sealed class MediaStore
     {
         try
         {
-            File.WriteAllText(_metaFile, JsonSerializer.Serialize(_kinds, new JsonSerializerOptions { WriteIndented = true }));
+            var root = new
+            {
+                kinds = _kinds,
+                cache = _cache
+            };
+            File.WriteAllText(_metaFile, JsonSerializer.Serialize(root, new JsonSerializerOptions { WriteIndented = true }));
         }
         catch
         {
             // Metadata is optional; the media file itself remains valid.
         }
+    }
+
+    public async Task<MediaItem> ImportFileAsync(string sourcePath, string? kind)
+    {
+        if (!File.Exists(sourcePath))
+            throw new FileNotFoundException("Source file nahi mila.", sourcePath);
+
+        var ext = Path.GetExtension(sourcePath).ToLowerInvariant();
+        var isImage = IsImage(ext);
+        var originalName = Path.GetFileName(sourcePath);
+        var targetName = MakeUniqueMediaName(originalName);
+        var target = _paths.SafeMediaPath(targetName);
+
+        await using (var input = new FileStream(
+            sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+            bufferSize: 1024 * 1024, useAsync: true))
+        await using (var output = new FileStream(
+            target, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+            bufferSize: 1024 * 1024, useAsync: true))
+        {
+            await input.CopyToAsync(output, 1024 * 1024);
+        }
+
+        if (!isImage)
+        {
+            lock (_metaGate)
+            {
+                _kinds[targetName] = NormalizeKind(kind);
+                SaveMetaLocked();
+            }
+        }
+
+        var fi = new FileInfo(target);
+        var date = new DateTimeOffset(fi.LastWriteTimeUtc).ToUnixTimeMilliseconds();
+        var duration = isImage ? 0 : ProbeDurationSeconds(fi.FullName);
+
+        lock (_metaGate)
+        {
+            _cache[targetName] = new CachedMeta { Size = fi.Length, Date = date, Duration = duration };
+            SaveMetaLocked();
+        }
+
+        return new MediaItem
+        {
+            Name = fi.Name,
+            Type = isImage ? "image" : "audio",
+            Kind = isImage ? "image" : GetKind(fi.Name),
+            Size = fi.Length,
+            Date = date,
+            Duration = duration
+        };
+    }
+
+    private string MakeUniqueMediaName(string original)
+    {
+        var clean = Path.GetFileName((original ?? string.Empty).Trim());
+        if (string.IsNullOrWhiteSpace(clean))
+            throw new ArgumentException("Filename missing hai.");
+
+        var candidate = clean;
+        var ext = Path.GetExtension(clean);
+        var stem = Path.GetFileNameWithoutExtension(clean);
+        var i = 1;
+
+        while (File.Exists(_paths.SafeMediaPath(candidate)))
+            candidate = $"{stem} ({i++}){ext}";
+
+        return candidate;
     }
 
     private static double ProbeDurationSeconds(string path)
@@ -195,6 +313,14 @@ public sealed class MediaItem
     public string Name { get; set; } = "";
     public string Type { get; set; } = "";
     public string Kind { get; set; } = "";
+    public long Size { get; set; }
+    public long Date { get; set; }
+    public double Duration { get; set; }
+}
+
+
+public sealed class CachedMeta
+{
     public long Size { get; set; }
     public long Date { get; set; }
     public double Duration { get; set; }

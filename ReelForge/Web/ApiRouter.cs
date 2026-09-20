@@ -45,6 +45,11 @@ public sealed class ApiRouter
 
     public async void HandleRequest(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
     {
+        // WebView2 request bodies are exposed as streams. The request must stay
+        // alive until all awaited work (including reading POST data) is finished.
+        // Without an explicit deferral, the body stream can be completed before
+        // Upload() consumes it, which makes browser uploads fail.
+        var deferral = e.GetDeferral();
         try
         {
             var req = e.Request;
@@ -88,6 +93,10 @@ public sealed class ApiRouter
         catch (Exception ex)
         {
             e.Response = JsonResponse(500, new { ok = false, error = ex.Message });
+        }
+        finally
+        {
+            deferral.Complete();
         }
     }
 
@@ -221,8 +230,15 @@ public sealed class ApiRouter
         if (!string.IsNullOrWhiteSpace(fileName))
         {
             fileName = Uri.UnescapeDataString(fileName);
-            if (req.Content is null) return new { ok = false, error = "upload body empty" };
+            if (req.Content is null) return new { ok = false, error = "upload body empty (WebView2 request had no Content stream)" };
+
             var media = await _media.SaveUploadAsync(req.Content, fileName, kind);
+            if (media.Size <= 0)
+            {
+                try { _media.Delete(media.Name); } catch { }
+                return new { ok = false, error = "upload body empty (0-byte file received)" };
+            }
+
             return new { ok = true, media };
         }
 
