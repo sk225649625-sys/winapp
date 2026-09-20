@@ -25,6 +25,7 @@ public sealed class ApiRouter
     ];
 
     private readonly AppPaths _paths;
+    private readonly CoreWebView2Environment _environment;
     private readonly ProjectStore _projects;
     private readonly MediaStore _media;
     private readonly JobManager _jobs;
@@ -33,9 +34,10 @@ public sealed class ApiRouter
         PropertyNameCaseInsensitive = true
     };
 
-    public ApiRouter(AppPaths paths)
+    public ApiRouter(AppPaths paths, CoreWebView2Environment environment)
     {
         _paths = paths;
+        _environment = environment;
         _projects = new ProjectStore(paths);
         _media = new MediaStore(paths);
         _jobs = new JobManager(paths);
@@ -223,7 +225,7 @@ public sealed class ApiRouter
         // Backward-compatible multipart handler for clients that send FormData.
         var contentType = Header(req, "Content-Type");
         var boundaryToken = contentType?
-            .Split("boundary=", StringSplitOptions.RemoveEmptyEntries, StringSplitOptions.TrimEntries)
+            .Split(new[] { "boundary=" }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .LastOrDefault();
         if (string.IsNullOrWhiteSpace(boundaryToken))
             return new { ok = false, error = "X-Name missing hai" };
@@ -328,18 +330,22 @@ public sealed class ApiRouter
         return await sr.ReadToEndAsync();
     }
 
-    private static CoreWebView2WebResourceResponse JsonResponse(int status, object value)
+    private CoreWebView2WebResourceResponse JsonResponse(int status, object value)
         => Response(status, "application/json; charset=utf-8",
             JsonSerializer.Serialize(value, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
 
-    private static CoreWebView2WebResourceResponse TextResponse(int status, string text)
+    private CoreWebView2WebResourceResponse TextResponse(int status, string text)
         => Response(status, "text/plain; charset=utf-8", text);
 
-    private static CoreWebView2WebResourceResponse Response(int status, string mime, string text)
+    private CoreWebView2WebResourceResponse Response(int status, string mime, string text)
         => Response(status, mime, Encoding.UTF8.GetBytes(text));
 
-    private static CoreWebView2WebResourceResponse Response(int status, string mime, byte[] bytes)
-        => new(status.ToString(), StatusText(status), "Content-Type: " + mime + "\r\nCache-Control: no-store", new MemoryStream(bytes));
+    private CoreWebView2WebResourceResponse Response(int status, string mime, byte[] bytes)
+        => _environment.CreateWebResourceResponse(
+            new MemoryStream(bytes, writable: false),
+            status,
+            StatusText(status),
+            "Content-Type: " + mime + "\r\nCache-Control: no-store");
 
     private static string StatusText(int code) => code switch
     {

@@ -26,13 +26,13 @@ public partial class MainWindow : Window
         {
             _paths = new AppPaths();
             _paths.EnsureDirectories();
-            _router = new ApiRouter(_paths);
 
             var environment = await CoreWebView2Environment.CreateAsync(
                 browserExecutableFolder: null,
                 userDataFolder: _paths.WebViewData,
                 options: null);
 
+            _router = new ApiRouter(_paths, environment);
             await Browser.EnsureCoreWebView2Async(environment);
             Browser.CoreWebView2.Settings.AreDevToolsEnabled = true;
             Browser.CoreWebView2.Settings.IsStatusBarEnabled = false;
