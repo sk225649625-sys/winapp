@@ -159,6 +159,13 @@ public sealed class ApiRouter
             return new { ok = true };
         }
 
+        // IMPORTANT: upload must be handled before ReadBody(req).
+        // ReadBody consumes the WebView2 request Content stream; if upload is
+        // handled afterward the file body is empty/disposed and the editor
+        // reports that the upload failed.
+        if (path == "/api/upload" && req.Method.Equals("POST", StringComparison.OrdinalIgnoreCase))
+            return await Upload(req);
+
         var body = await ReadBody(req);
         var node = string.IsNullOrWhiteSpace(body)
             ? new JsonObject()
@@ -202,9 +209,6 @@ public sealed class ApiRouter
             var started = _jobs.Start(project, kind);
             return new { ok = started, error = started ? null : "ek render pehle se chal raha hai" };
         }
-
-        if (path == "/api/upload" && req.Method.Equals("POST", StringComparison.OrdinalIgnoreCase))
-            return await Upload(req);
 
         return new { ok = false, error = "Unknown API route" };
     }
