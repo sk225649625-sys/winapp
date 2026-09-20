@@ -1,5 +1,5 @@
-using Microsoft.Web.WebView2.Core;
 using System.Windows;
+using Microsoft.Web.WebView2.Core;
 using ReelForge.Infrastructure;
 using ReelForge.Web;
 
@@ -9,6 +9,7 @@ public partial class MainWindow : Window
 {
     private AppPaths _paths = null!;
     private ApiRouter _router = null!;
+    private bool _ready;
 
     public MainWindow()
     {
@@ -18,19 +19,45 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        _paths = new AppPaths();
-        _paths.EnsureDirectories();
+        if (_ready) return;
+        _ready = true;
 
-        _router = new ApiRouter(_paths);
-        await Browser.EnsureCoreWebView2Async();
+        try
+        {
+            _paths = new AppPaths();
+            _paths.EnsureDirectories();
+            _router = new ApiRouter(_paths);
 
-        Browser.CoreWebView2.Settings.AreDevToolsEnabled = true;
-        Browser.CoreWebView2.Settings.IsStatusBarEnabled = false;
-        Browser.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
+            var environment = await CoreWebView2Environment.CreateAsync(
+                browserExecutableFolder: null,
+                userDataFolder: _paths.WebViewData,
+                options: null);
 
-        Browser.CoreWebView2.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
-        Browser.CoreWebView2.WebResourceRequested += _router.HandleRequest;
+            await Browser.EnsureCoreWebView2Async(environment);
+            Browser.CoreWebView2.Settings.AreDevToolsEnabled = true;
+            Browser.CoreWebView2.Settings.IsStatusBarEnabled = false;
+            Browser.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
 
-        Browser.CoreWebView2.Navigate("https://reelforge.local/editor.html");
+            // Give the existing editor.html a stable local HTTPS origin.
+            Browser.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                "reelforge.local",
+                _paths.WebRoot,
+                CoreWebView2HostResourceAccessKind.Allow);
+
+            Browser.CoreWebView2.AddWebResourceRequestedFilter(
+                "https://reelforge.local/*",
+                CoreWebView2WebResourceContext.All);
+            Browser.CoreWebView2.WebResourceRequested += _router.HandleRequest;
+
+            Browser.CoreWebView2.Navigate("https://reelforge.local/editor.html");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"ReelForge start nahi ho paya.\n\n{ex.Message}",
+                "ReelForge",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
     }
 }

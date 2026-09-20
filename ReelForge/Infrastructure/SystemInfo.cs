@@ -9,6 +9,8 @@ public static class SystemInfo
             machine = Environment.MachineName,
             arch = Environment.Is64BitOperatingSystem ? "x64" : "x86",
             app = "ReelForge Native",
-            python = false
+            python = false,
+            cores = Environment.ProcessorCount,
+            webRoot = AppContext.BaseDirectory
         };
 }

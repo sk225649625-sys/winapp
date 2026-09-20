@@ -4,12 +4,13 @@ internal static class QueryString
 {
     public static string? Get(Uri uri, string key)
     {
-        var q = uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries);
-        foreach (var item in q)
+        foreach (var item in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
             var pair = item.Split('=', 2);
-            if (pair.Length == 2 && Uri.UnescapeDataString(pair[0]).Equals(key, StringComparison.OrdinalIgnoreCase))
-                return Uri.UnescapeDataString(pair[1].Replace("+", " "));
+            if (pair.Length != 2) continue;
+            var k = Uri.UnescapeDataString(pair[0].Replace("+", " "));
+            if (!k.Equals(key, StringComparison.OrdinalIgnoreCase)) continue;
+            return Uri.UnescapeDataString(pair[1].Replace("+", " "));
         }
         return null;
     }

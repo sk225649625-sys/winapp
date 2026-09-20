@@ -1,5 +1,3 @@
-using System.Text.Json.Serialization;
-
 namespace ReelForge.Models;
 
 public sealed class Project
@@ -19,9 +17,9 @@ public sealed class Clip
 {
     public string File { get; set; } = "";
     public double Dur { get; set; } = 3;
-    public string Motion { get; set; } = "kenburns";
+    public string Motion { get; set; } = "kenIn";
     public double Intensity { get; set; } = .6;
-    public string Trans { get; set; } = "crossfade";
+    public string Trans { get; set; } = "none";
     public double TransDur { get; set; } = .6;
     public string Look { get; set; } = "none";
     public string Fit { get; set; } = "auto";
@@ -38,6 +36,8 @@ public sealed class AudioClip
     public double Dur { get; set; } = 3;
     public double Offset { get; set; }
     public double Vol { get; set; } = 1;
+    public double FadeIn { get; set; } = .2;
+    public double FadeOut { get; set; } = .4;
     public bool Loop { get; set; }
 }
 
