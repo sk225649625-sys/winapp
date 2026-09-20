@@ -1,13 +1,10 @@
-name: Build ReelForge Windows
+name: build-windows-native
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ main, master ]
-    tags: [ "v*" ]
-
-permissions:
-  contents: write
+    branches: ["main"]
+    tags: ["v*"]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,44 +17,41 @@ jobs:
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: 8.0.x
 
-      - name: Restore
-        run: dotnet restore ReelForge.sln -p:Platform=x64
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
 
-      - name: Build
-        run: dotnet build ReelForge.sln -c Release -p:Platform=x64 --no-restore
+      - name: Build native C++ + C#
+        run: msbuild ReelForge.sln /m /p:Configuration=Release /p:Platform=x64
 
-      - name: Publish self-contained EXE
-        run: dotnet publish ReelForge/ReelForge.csproj -c Release -p:Platform=x64 -r win-x64 --self-contained true -o publish --no-restore
+      - name: Publish single-file EXE
+        run: dotnet publish ReelForge/ReelForge.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish
 
-      - name: Prepare package
+      - name: Package
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path package | Out-Null
-          Copy-Item publish/* package/ -Recurse -Force
-          if (Test-Path "ReelForge/wwwroot") {
-            New-Item -ItemType Directory -Force -Path package/wwwroot | Out-Null
-            Copy-Item ReelForge/wwwroot/* package/wwwroot/ -Recurse -Force
+          Copy-Item publish\* package\ -Recurse -Force
+          New-Item -ItemType Directory -Force -Path package\data\projects,package\data\cache,package\data\exports,package\data\logs | Out-Null
+          if (Test-Path ReelForge\native\ReelForge.Native.dll) {
+            Copy-Item ReelForge\native\ReelForge.Native.dll package\ -Force
+          } elseif (Test-Path native\ReelForge.Native\bin\Release\x64\ReelForge.Native.dll) {
+            Copy-Item native\ReelForge.Native\bin\Release\x64\ReelForge.Native.dll package\ -Force
           }
-          New-Item -ItemType Directory -Force -Path package/data/media | Out-Null
-          New-Item -ItemType Directory -Force -Path package/data/projects | Out-Null
-          New-Item -ItemType Directory -Force -Path package/data/exports | Out-Null
-          New-Item -ItemType Directory -Force -Path package/data/cache | Out-Null
-          New-Item -ItemType Directory -Force -Path package/data/webview2 | Out-Null
-          Copy-Item README.md package/README.md -Force
-          Compress-Archive -Path package/* -DestinationPath ReelForge-windows-x64.zip -Force
+
+      - name: Zip artifact
+        shell: pwsh
+        run: Compress-Archive -Path package\* -DestinationPath ReelForge-Windows-x64.zip -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ReelForge-windows-x64
-          path: ReelForge-windows-x64.zip
-          if-no-files-found: error
+          name: ReelForge-Windows-x64
+          path: ReelForge-Windows-x64.zip
 
       - name: Release tagged build
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: ReelForge-windows-x64.zip
+          files: ReelForge-Windows-x64.zip
