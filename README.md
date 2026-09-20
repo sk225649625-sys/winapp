@@ -1,46 +1,61 @@
-# ReelForge — Fully Native Windows Editor
+# ReelForge — Full C++ Windows Desktop
 
-This branch is a **real Windows desktop app**. It does not use:
+This version is intentionally **100% native C++**.
 
+## Removed
+
+- HTML editor
+- JavaScript editor
 - WebView2
-- HTML/JavaScript editor
 - localhost server
-- `/api/*` upload endpoints
-- browser-style media uploads
+- - HTTP upload endpoints
+- browser-style media handling
+- C# / WPF host
 
-## Architecture
+## Native stack
 
-- **C# / WPF**: native editor UI, project system, file dialogs, preview.
-- **C++ / Win32 DLL**: native render launcher + fast local filesystem helpers.
-- **FFmpeg executable**: external local render engine.
-- **Windows drives**: media can stay on `C:\`, `D:\`, `E:\`, `F:\`, removable drives, etc.
-- Project JSON stores the actual local file paths. Files are not uploaded to a server.
+- Win32 windowing and controls
+- Common Controls
+- Windows file picker (`GetOpenFileNameW`)
+- Win32 drag & drop (`WM_DROPFILES`)
+- native C++ project/timeline/media modules
+- FFmpeg as a local executable for rendering
+- Windows `ShellExecute` / ffplay for local playback
 
-## Local data
+## Local drives
 
-Only project/cache/export app data is beside the EXE:
+Media remains at the original path:
 
 ```text
-ReelForge.exe
-ReelForge.Native.dll
-data/
-  projects/
-  cache/
-  exports/
-  logs/
+C:\Videos\clip.mp4
+E:\Projects\photos\photo1.jpg
+F:\Music\song.mp3
 ```
 
-Media files do **not** have to be copied into the app folder.
+Nothing is uploaded to a server and nothing is converted into a URL.
 
-## Add media
+ReelForge only writes app data under:
 
-Use the native **+ Image / Video**, **+ Music**, **+ SFX**, or **+ Voice** buttons.
-The normal Windows file picker opens. Select a file from any local drive.
+```text
+data\
+  projects\
+  cache\
+  exports\
+```
 
-Double-click a library item or press `+ timeline` to put it on the timeline.
+## Source-derived module names
+
+The native inspector keeps the same Motion, Transition, Look, Caption, Fit and
+Audio FX catalogs as the supplied editor source. The source defines the
+15 motions, 10 transitions, 8 looks, 4 caption styles, 3 fit modes and 5 audio
+effects used by the editor.
 
 ## Build
 
-Open `ReelForge.sln` in Visual Studio 2022 with Desktop C++ + .NET 8 installed.
+Visual Studio 2022 + Desktop development with C++ + Windows 10/11 SDK.
 
-Or push to GitHub and let `.github/workflows/build.yml` produce the x64 ZIP.
+```powershell
+msbuild ReelForgeNative.sln /m /p:Configuration=Release /p:Platform=x64
+```
+
+Put `ffmpeg.exe` beside the EXE or in PATH.
