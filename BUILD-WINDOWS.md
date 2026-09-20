@@ -1,11 +1,16 @@
-# Windows build quick check
+# Windows build requirements
 
-After extracting the repository on a Windows PC with .NET 8 SDK:
+Visual Studio 2022:
+- Desktop development with C++
+- MSVC v143
+- Windows 10/11 SDK
+- .NET 8 SDK
+
+Then:
 
 ```powershell
-dotnet restore ReelForge.sln -p:Platform=x64
-dotnet build ReelForge.sln -c Release -p:Platform=x64
-dotnet publish ReelForge\ReelForge.csproj -c Release -p:Platform=x64 -r win-x64 --self-contained true -o publish
+msbuild ReelForge.sln /m /p:Configuration=Release /p:Platform=x64
+dotnet publish ReelForge/ReelForge.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```
 
-For GitHub Actions, push to `main`/`master` or run the workflow manually from Actions.
+Place `ffmpeg.exe` next to ReelForge.exe or ensure `ffmpeg.exe` is in PATH.

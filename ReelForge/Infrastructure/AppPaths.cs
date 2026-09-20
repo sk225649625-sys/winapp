@@ -1,43 +1,29 @@
-using System.IO;
-
 namespace ReelForge.Infrastructure;
 
 public sealed class AppPaths
 {
-    public string BaseDirectory { get; } = AppContext.BaseDirectory;
-    public string Root { get; }
-    public string Media => Path.Combine(Root, "media");
-    public string Projects => Path.Combine(Root, "projects");
-    public string Exports => Path.Combine(Root, "exports");
-    public string Cache => Path.Combine(Root, "cache");
-    public string WebViewData => Path.Combine(Root, "webview2");
-    public string WebRoot => Path.Combine(BaseDirectory, "wwwroot");
+    public string Root { get; } = AppContext.BaseDirectory;
+    public string Data { get; }
+    public string Projects { get; }
+    public string Cache { get; }
+    public string Exports { get; }
+    public string Logs { get; }
 
     public AppPaths()
     {
-        // The user asked for the working folders beside the EXE.
-        Root = Path.Combine(BaseDirectory, "data");
+        Data = Path.Combine(Root, "data");
+        Projects = Path.Combine(Data, "projects");
+        Cache = Path.Combine(Data, "cache");
+        Exports = Path.Combine(Data, "exports");
+        Logs = Path.Combine(Data, "logs");
     }
 
-    public void EnsureDirectories()
+    public void Ensure()
     {
-        Directory.CreateDirectory(Root);
-        Directory.CreateDirectory(Media);
+        Directory.CreateDirectory(Data);
         Directory.CreateDirectory(Projects);
-        Directory.CreateDirectory(Exports);
         Directory.CreateDirectory(Cache);
-        Directory.CreateDirectory(WebViewData);
-    }
-
-    public string SafeMediaPath(string name) => SafeChild(Media, name);
-    public string SafeProjectPath(string name) => SafeChild(Projects, name);
-    public string SafeExportPath(string name) => SafeChild(Exports, name);
-
-    private static string SafeChild(string root, string name)
-    {
-        var clean = Path.GetFileName(name?.Trim() ?? string.Empty);
-        if (string.IsNullOrWhiteSpace(clean) || clean is "." or "..")
-            throw new ArgumentException("Invalid filename.");
-        return Path.Combine(root, clean);
+        Directory.CreateDirectory(Exports);
+        Directory.CreateDirectory(Logs);
     }
 }
